@@ -11,13 +11,11 @@ from inputimeout import inputimeout, TimeoutOccurred
 # requests
 # inputimeout
 
-# ---- MUST CHANGE CONTENTS BELOW TO MATCH ----
-# - change plex url from: '<PLEX URL>" to match
-# - fill out videoClientID & audioClientID to match
-#   - client IDs can be found here: '<PLEX URL>/clients'
-
-videoClientID = "<VIDEO CLIENT ID>"
-audioClientID = "<AUDIO CLIENT ID>"
+# **** CHANGE THESE VARIABLES TO MATCH YOUR PARTICULAR APPLICATION ****
+plexAPIURL = '<PLEX URL>' # 'http://10.0.1.3:32400'
+videoClientID = "<VIDEO CLIENT ID>" # iPhone
+audioClientID = "<AUDIO CLIENT ID>" #Android Plexamp
+# *********************************************************************
 
 thisFile = ""
 thisAudioKey = ""
@@ -27,7 +25,6 @@ musicVideoKey = ""
 vidAvail = False
 audAvail = False
 remTXT = False
-reloadAudio = False
 
 def convertMillis(millis):
     seconds=int(millis/1000)%60
@@ -36,10 +33,10 @@ def convertMillis(millis):
     return str(hours).zfill(2) + ":" + str(minutes).zfill(2) + ":" + str(seconds).zfill(2)
     
 def getPlexSession():
-    plexSessions = requests.get('<PLEX URL>/status/sessions')
+    plexSessions = requests.get(plexAPIURL + '/status/sessions')
     return ElementTree.fromstring(plexSessions.content)
 # -----------------
-plexClients = requests.get('<PLEX URL>/clients')
+plexClients = requests.get(plexAPIURL + '/clients')
 plexClientsXML = ElementTree.fromstring(plexClients.content)
     
 for client in plexClientsXML:
@@ -71,8 +68,7 @@ for track in plexSessionsXML:
         thisAudioKey = track.attrib['key'] #/library/metadata/269473
         curAudioPos = track.attrib['viewOffset']
         audioClientDevice = track.find('Player').attrib['device']
-        thisAlbum = track.attrib['parentKey']
-        # print("thisAlbum: " + thisAlbum)
+        thisAlbum = track.attrib['parentKey'] # in case we need to refresh the music video key
         thisFile = track.find('Media').find('Part').attrib['file']
         musicVideoKey = track.get('primaryExtraKey')
         if not musicVideoKey:
@@ -91,23 +87,22 @@ if musicVideoKey == "":
 
 # get the name of the music video associated with the active audio track
 print("\nGetting music video information")
-musicVideoMeta = requests.get('<PLEX URL>' + musicVideoKey)
+musicVideoMeta = requests.get(plexAPIURL + musicVideoKey)
 musicVideoMetaXML = ElementTree.fromstring(musicVideoMeta.content)
 
 while musicVideoMetaXML.text is None:
     # https://python-plexapi.readthedocs.io/en/latest/modules/base.html#plexapi.base.PlexPartialObject.refresh
     print("Music Video Error, refreshing metadata")
-    requests.put('<PLEX URL>' + thisAlbum + "/refresh")
-    #reloadAudio = True
+    requests.put(plexAPIURL + thisAlbum + "/refresh")
     time.sleep(1)
     
     # ------------ reload audio ---------------
     audHeaders = {'X-Plex-Target-Client-Identifier' : audioClientID}
-    audURL = "<PLEX URL>/player/playback/playMedia"
+    audURL = plexAPIURL + '/player/playback/playMedia'
     audParams = {'key': thisAudioKey, 'offset': curAudioPos, 'address': '10.0.1.3', 'port': 32400, 'machineIdentifier': 'e4eeef8242e31570f2472074c48aa78130bfd73f'}
     requests.get(audURL, params=audParams, headers=audHeaders)
     # ------------ try to get music video data again ---------------
-    musicVideoMeta = requests.get('<PLEX URL>' + musicVideoKey)
+    musicVideoMeta = requests.get(plexAPIURL + musicVideoKey)
     musicVideoMetaXML = ElementTree.fromstring(musicVideoMeta.content)
 
 musicVideoTitle = musicVideoMetaXML[0].attrib['title']
@@ -169,18 +164,23 @@ if offsetVideoPosition < 0:
     curAudioPos = int(curAudioPos) + (float(offsetTime) * 1000)
     offsetVideoPosition = offsetVideoPosition + (float(offsetTime) * 1000)
 
+# if player needs to set video file, start playing the file, then sync the two files together later.
+print("\nSyncing Plex players")
 vidHeaders = {'X-Plex-Target-Client-Identifier' : videoClientID}
-if thisVideoKey == musicVideoKey:
-    vidURL = "<PLEX URL>/player/playback/seekTo"
-    vidParams = {'offset': offsetVideoPosition, 'type': 'video'}
-else:
-    vidURL = "<PLEX URL>/player/playback/playMedia"
-    vidParams = {'key': musicVideoKey, 'offset': offsetVideoPosition, 'address': '10.0.1.3', 'port': 32400, 'machineIdentifier': 'e4eeef8242e31570f2472074c48aa78130bfd73f'}
+if thisVideoKey != musicVideoKey:
+    print("\nSetting video player to file")
+    vidURL = plexAPIURL + '/player/playback/playMedia'
+    # just get video going, then delay
+    vidParams = {'key': musicVideoKey, 'address': '10.0.1.3', 'port': 32400, 'machineIdentifier': 'e4eeef8242e31570f2472074c48aa78130bfd73f'}
+    requests.get(vidURL, params=vidParams, headers=vidHeaders)
+    time.sleep(3)
+
+vidURL = plexAPIURL + '/player/playback/seekTo'
+vidParams = {'offset': offsetVideoPosition, 'type': 'video'}
 
 audHeaders = {'X-Plex-Target-Client-Identifier' : audioClientID}
-audURL = "<PLEX URL>/player/playback/seekTo"
+audURL = plexAPIURL + '/player/playback/seekTo'
 audParams = {'offset': curAudioPos, 'type': 'music'}
 
-print("\nSyncing Plex players")
 requests.get(vidURL, params=vidParams, headers=vidHeaders)
 requests.get(audURL, params=audParams, headers=audHeaders)
